@@ -80,6 +80,7 @@ cv::Mat shadowDetection(cv::Mat &image){
 
 /* Shadow Removal on the basis of Y correction and colour adjustment*/
 cv::Mat LaneDetector::shadowRemoval(cv::Mat &img){
+
     cv::Mat original_image=img;
     int shadow_mean =0, non_shadow_mean =0 ,count_shadow=0,count_non_shadow=0, difference;
     cv::Mat binary(original_image.rows,original_image.cols,CV_8UC1,cvScalarAll(0));

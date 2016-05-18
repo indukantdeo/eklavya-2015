@@ -58,7 +58,9 @@ private:
     cv::Mat getLaneBinary(cv::Mat &image); // Detect lanes and return a binary image with Lanes only
     cv::Mat seperateLanes(cv::Mat &image); // Seperate the binary image into different lanes
     cv::Mat fixBrokenLanes(cv::Mat &image); // Curve Fitting and Dilate to fix the broken lanes
+    cv::Mat perspective_transform(cv::Mat &image); //changes view from bird's eye to camera
     cv::Mat inversePerspectiveTransform(cv::Mat &image); // Change the view to bird's eye view
+    cv::Mat filter(cv::Mat &image); //filters out noise and white obstacles
     pcl::PointCloud<pcl::PointXYZ>::Ptr generatecloud(cv::Mat &image);
 
     // Communication Functions

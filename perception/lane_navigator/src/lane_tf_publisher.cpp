@@ -22,7 +22,6 @@ private:
   tf::MessageFilter<geometry_msgs::PoseStamped> * tf_filter_;
   ros::NodeHandle n_;
   std::string target_frame_;
-
   //  Callback to register with tf::MessageFilter to be called when transforms are available
   void msgCallback(const boost::shared_ptr<const geometry_msgs::PoseStamped>& point_ptr)
   {

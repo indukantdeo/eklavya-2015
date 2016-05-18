@@ -50,7 +50,7 @@ cv::Mat ObstacleRemovedBinary(cv::Mat &image) {
 }
 
 cv::Mat LaneDetector::obstacleRemoval(cv::Mat &image) {
-    cv::Mat img_HSV(image.rows, image.cols, CV_8UC3);
+    /*(cv::Mat img_HSV(image.rows, image.cols, CV_8UC3);
     cv::Mat binary_after_HSV_thresholding(image.rows, image.cols, CV_8UC1);
     cv::Mat binary_dialated(image.rows, image.cols, CV_8UC1);
 
@@ -66,7 +66,69 @@ cv::Mat LaneDetector::obstacleRemoval(cv::Mat &image) {
             image.at<cv::Vec3b>(i, j)[2] = (255 - binary_dialated.at<uchar>(i, j)) & image.at<cv::Vec3b>(i, j)[2];
         }
     }
+    return image;*/
+
+    //return image;
+
+    cv::imshow("before obstacles removal",image);
+
+    cv::Mat img_hsv = image;
+    //cv::cvtColor(image,img_hsv,CV_BGR2HSV);
+
+    cv::Mat channel[3];
+    cv::split(img_hsv, channel);
+    cv::Mat img_hue=img_hsv; //channel[0];
+
+    cv::SimpleBlobDetector::Params params;
+
+    // Filter by Area.
+    params.filterByArea = true;
+    //params.minArea = 0;
+    params.maxArea=100000000;
+
+    // Change thresholds
+    params.minThreshold = 0;
+    params.maxThreshold = 255;
+    params.thresholdStep= 10;
+
+    //merge close by blobs
+    //params.minDistBetweenBlobs=50;
+
+    cv::SimpleBlobDetector detector(params);
+    std::vector<cv::KeyPoint> obs;
+
+    detector.detect( img_hue, obs);
+
+    std::cout<<obs.size()<<std::endl;
+
+    cv::Mat blobs=img_hue-img_hue, circle;
+    cv::drawKeypoints( blobs, obs, circle, cv::Scalar(0,0,255), cv::DrawMatchesFlags::DEFAULT );
+    cv::imshow("blobs", circle);
+
+    for(size_t i=0;i<obs.size();i++)
+    {
+        cv::Point corners[1][20];
+        corners[0][0]=cv::Point(obs[i].pt.x-obs[i].size, obs[i].pt.y-obs[i].size);
+        corners[0][1]=cv::Point(obs[i].pt.x-obs[i].size, obs[i].pt.y+obs[i].size);
+        corners[0][2]=cv::Point(obs[i].pt.x+obs[i].size, obs[i].pt.y+obs[i].size);
+        corners[0][3]=cv::Point(obs[i].pt.x+obs[i].size, obs[i].pt.y-obs[i].size);
+
+        const cv::Point* rect[1]={corners[0]};
+        int num_corners[] = { 4 };
+
+        cv::fillPoly(img_hue, rect, num_corners, 1, 0, 8);
+    }
+
+    //channel[0]=img_hue;
+    //cv::merge(channel,3, image);
+    //cv::cvtColor(img_hsv,image,CV_HSV2BGR);
+
+    cv::imshow("after obstacles removal",img_hue);
+
     return image;
+
+
+
 }
 
 void ReadParameterFromFile() {

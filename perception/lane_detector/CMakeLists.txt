@@ -81,8 +81,10 @@ add_library(laneDetector
                      src/detector/laneDetector.cpp
                      src/detector/obstacleRemoval.cpp
                      src/detector/preprocessing.cpp
-		     src/detector/shadowRemoval.cpp
-		     src/detector/cloudpoint.cpp)
+		                  src/detector/shadowRemoval.cpp
+		                  src/detector/cloudpoint.cpp
+		                  src/detector/filter.cpp)
+		                  #src/detector/perspective_transform.cpp)
 target_link_libraries(laneDetector svm ${OpenCV_LIBRARIES} ${catkin_LIBRARIES})
 
 add_executable(lane_detector src/laneDetectorNode.cpp)

@@ -3,6 +3,27 @@
 #include <laneDetector.hpp>
 #include <tf/transform_broadcaster.h>
 
+/*void CallBackFunc(int event, int x, int y, int flags, void* userdata)
+{
+     if  ( event == cv::EVENT_LBUTTONDOWN )
+     {
+          ROS_INFO("position %d, %d\n", x, y);
+     }
+     else if  ( event == cv::EVENT_RBUTTONDOWN )
+     {
+          ROS_INFO("position %d, %d\n", x, y);
+     }
+     else if  ( event == cv::EVENT_MBUTTONDOWN )
+     {
+          printf("position %d, %d\n", x, y);
+     }
+     else if ( event == cv::EVENT_MOUSEMOVE )
+     {
+          printf("position %d, %d\n", x, y);
+
+     }
+}*/
+
 LaneDetector::LaneDetector(ros::NodeHandle& node_handle) {
     loadParams(node_handle);
 
@@ -13,6 +34,8 @@ LaneDetector::LaneDetector(ros::NodeHandle& node_handle) {
     std::string model_path = ros::package::getPath("lane_detector")+"/data/"+training_data_file + ".model";
     svm->loadModel(model_path.c_str());
     setupComms();
+
+    //cv::setMouseCallback("ipt_output_window", CallBackFunc, NULL);
 
     if (debug_mode > 0) {
         original_image_window = ros::this_node::getName() + std::string("/original_image");
@@ -36,6 +59,9 @@ LaneDetector::~LaneDetector() {
 void LaneDetector::interpret() {
     total_time_elapsed = 0;
     cv::Mat result = original_image;
+
+
+    cv::imshow("camera input", result);
     //cv::imwrite(ros::this_node::getName(),original_image);
     if (debug_mode > 0) {
         cv::imshow(result_window, result);
@@ -51,7 +77,11 @@ void LaneDetector::interpret() {
       cv::imshow("shadowRemoved",result);
       cv::waitKey(wait_time);
     }
+
+    //result=obstacleRemoval(result);
+
     result = inversePerspectiveTransform(result);
+    
     if (time_functions == 2) {
         gettimeofday(&tval_after, NULL);
         time_elapsed = tval_after.tv_sec + (tval_after.tv_usec / 1000000.0) - (tval_before.tv_sec + (tval_before.tv_usec / 1000000.0));
@@ -70,27 +100,9 @@ void LaneDetector::interpret() {
     //cv::Mat dest;
     //cv::resize(result,dest,cv::Size(),0.5,0.5,CV_INTER_LINEAR );
     //result=dest;
-    cv::Mat redchan(result.rows,result.cols,CV_8UC1);
-    for(int i=0;i<result.rows;i++)
-    {
-      for(int j=0;j<result.cols;j++)
-      {
-        redchan.at<uchar>(i,j)=result.at<cv::Vec3b>(i,j)[2];
-      }
-    }
-    redchan = grassRemoval(redchan);
-    for(int i=0;i<result.rows;i++)
-    {
-      for(int j=0;j<result.cols;j++)
-      {
-        if(redchan.at<uchar>(i,j)==0)
-        {
-          result.at<cv::Vec3b>(i,j)[0]=0;
-          result.at<cv::Vec3b>(i,j)[1]=0;
-          result.at<cv::Vec3b>(i,j)[2]=0;
-        }
-      }
-    }
+    
+    result = grassRemoval(result);
+    
     if (time_functions > 0) {
         gettimeofday(&tval_after, NULL);
         time_elapsed = tval_after.tv_sec + (tval_after.tv_usec / 1000000.0) - (tval_before.tv_sec + (tval_before.tv_usec / 1000000.0));
@@ -131,6 +143,8 @@ void LaneDetector::interpret() {
     }
 
     result = getLaneBinary(result);
+
+    //result=filter(result);
 
     if (time_functions > 0) {
         gettimeofday(&tval_after, NULL);

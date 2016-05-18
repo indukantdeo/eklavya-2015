@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 
 <launch>
-    <node pkg="lane_navigator" type="lane_navigator" name="lane_navigator">
+    <node pkg="lane_navigator" type="lane_navigator" name="lane_navigator" output="screen">
     </node>
     <node pkg="lane_navigator" type="lane_tf_publisher" name="lane_tf_publisher">
     </node>

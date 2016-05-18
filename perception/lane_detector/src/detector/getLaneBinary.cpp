@@ -98,5 +98,6 @@ cv::Mat LaneDetector::getLaneBinary(cv::Mat &image) {
     threshold_image = applyThreshold(image, debug_mode);
     hough_image = applyHough(threshold_image, debug_mode);
     cv::Mat canny_image = applyCanny(hough_image,debug_mode);
-    return hough_image;
+    //return hough_image;
+    return canny_image;
 } // Detect lanes and return a binary image with Lanes only

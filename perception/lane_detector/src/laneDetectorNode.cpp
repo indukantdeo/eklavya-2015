@@ -33,6 +33,7 @@ void exitWithHelp() {
     exit(1);
 }
 
+
 int main(int argc, char *argv[]) {
     std::string node_name = argv[1];
     ros::init(argc, argv, node_name);
@@ -47,6 +48,8 @@ int main(int argc, char *argv[]) {
             break;
         }
     }
+
+
 
     LaneDetector lane_detector(node_handle);
 
