@@ -16,9 +16,16 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 find_package(OpenCV REQUIRED)
-
 include_directories(  ${catkin_INCLUDE_DIRS}  ${OpenCV_INCLUDE_DIRS} )
 include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
+find_package(PCL 1.3 REQUIRED COMPONENTS common io)
+include_directories(  ${catkin_INCLUDE_DIRS}  ${OpenCV_INCLUDE_DIRS} )
+include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
+include_directories(  ${catkin_INCLUDE_DIRS}  ${OpenCV_INCLUDE_DIRS} )
+include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
+include_directories(${PCL_INCLUDE_DIRS})
+link_directories(${PCL_LIBRARY_DIRS})
+add_definitions(${PCL_DEFINITIONS})
 # Set the build type.  Options are:
 #  Coverage       : w/ debug symbols, w/o optimization, w/ code-coverage
 #  Debug          : w/ debug symbols, w/o optimization
@@ -52,6 +59,8 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 #uncomment if you have defined services
 #rosbuild_gensrv()
 
+
+
 #common commands for building c++ executables and libraries
 #rosbuild_add_library(${PROJECT_NAME} src/example.cpp)
 #target_link_libraries(${PROJECT_NAME} another_library)
@@ -59,9 +68,14 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 #rosbuild_link_boost(${PROJECT_NAME} thread)
 #rosbuild_add_executable(example examples/example.cpp)
 #target_link_libraries(example ${PROJECT_NAME})
+
+#add_library(lane_navigator
+#                     src/pointcloud.cpp)
+
+
 include_directories( include ${OpenCV_INCLUDE_DIRS} ${gps_common_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS})
 add_executable(lane_navigator src/lane_navigator.cpp)
-target_link_libraries(lane_navigator ${OpenCV_LIBRARIES} ${catkin_LIBRARIES})
+target_link_libraries(lane_navigator ${OpenCV_LIBRARIES} ${catkin_LIBRARIES} ${PCL_COMMON_LIBRARIES} ${PCL_IO_LIBRARIES})
 add_executable(lane_tf_publisher src/lane_tf_publisher.cpp)
 target_link_libraries(lane_tf_publisher ${OpenCV_LIBRARIES} ${catkin_LIBRARIES} tf)
 add_executable(lane_target_odom src/lane_target_odom.cpp)

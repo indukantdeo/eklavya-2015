@@ -29,5 +29,3 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr LaneDetector::generatecloud(cv::Mat& img)
 
 	return cloud_msg;
 }
-
-

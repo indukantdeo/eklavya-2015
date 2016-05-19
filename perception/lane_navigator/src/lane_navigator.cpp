@@ -1,8 +1,27 @@
 #include <lane_navigator.hpp>
 //#pragma_once
 
+#include <opencv2/highgui/highgui.hpp>
+#include <ros/package.h>
+#include <math.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/ros/conversions.h>
+
+#define ANGLE_SPREAD 180
+#define BOT_REFERENCE_X 500
+#define BOT_REFERENCE_Y 100   //100 pixels with respect to cartesian coordinates
+#define LARGE_VAL 10000
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr addtocloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_msg, cv::Point p)
+{
+    cloud_msg->points.push_back(pcl::PointXYZ(((p.y-1000)+2*BOT_REFERENCE_Y)*(0.01) + 5.82,(BOT_REFERENCE_X-p.x)*0.01,0));
+    return cloud_msg;
+}
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
-PointCloud::Ptr cloud_msg(new PointCloud);
+PointCloud::Ptr lane_cloud(new PointCloud);
+
+ros::Publisher cloud_pub;
 
 
 const int bot_x = 500, bot_y = 900;
@@ -43,7 +62,43 @@ geometry_msgs::PoseStamped convert_Pose2D_to_PoseStamped(geometry_msgs::Pose2D p
     return pose_stamp;
 }
 
+void update_pointcloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
+{
+  lane_cloud=cloud;
 
+  std::cout << "Entered update cloud" << std::endl << std::endl << std::endl;
+}
+
+cv::Point laneStart(cv::Mat& output_lane)
+{
+    int error_margin=35;
+
+    int i, j, flag=0;
+    cv::Point lanestart;
+    lanestart.x=0;
+    lanestart.y=0;
+
+    for(i=output_lane.rows-1;i>=0;i--)
+    {
+        if(flag>=error_margin) break;
+
+        for(j=0;j<output_lane.cols;j++)
+        {
+            if(flag>=error_margin) break;
+            if(output_lane.at<uchar>(i,j)==255)
+            {
+                flag++;
+                lanestart.x+=j;
+                lanestart.y+=i;
+            }
+        }
+    }
+
+    lanestart.x=lanestart.x/error_margin;
+    lanestart.y=lanestart.y/error_margin;
+
+    return lanestart;
+}
 
 cv::Mat quadratic_curve::draw_curve(cv::Mat img)
 {
@@ -647,7 +702,6 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
    //cv::circle(final_output, {target_point.x,target_point.y}, 50, cv::Scalar(122,0,0), 1, 8, 0);
     imshow("right_lines",right_lines);
     imshow("left_lines",left_lines);
-    imshow("waypoint", final_output);
     imshow("heading", head);
 
 
@@ -668,6 +722,57 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
 
     start_frame=false;
 
+    //
+    //Add additional lanes
+    // 
+    if(single_lane==false)
+    {
+        cv::Point left_start, right_start;
+
+        if(first_lane.x_intercept(img)>second_lane.x_intercept(img))
+        {
+            left_start=laneStart(output_second_lane);
+            right_start=laneStart(output_first_lane);
+        }
+        else
+        {
+            right_start=laneStart(output_second_lane);
+            left_start=laneStart(output_first_lane);
+        }
+
+        for(i=left_start.y;i<img.rows;i++)
+            {
+                lane_cloud=addtocloud(lane_cloud, {left_start.x-(i-left_start.y),i});
+                //std::cout<<lane_cloud->points.size()<<std::endl;
+            }
+
+        for(i=right_start.y;i<img.rows;i++)
+            lane_cloud=addtocloud(lane_cloud, {right_start.x+(i-right_start.y),i});
+
+        cv::circle(final_output, left_start, 30, cv::Scalar(255,0,0), 1, 8, 0);
+        cv::circle(final_output, right_start, 30, cv::Scalar(255,0,0), 1, 8, 0);
+
+        cv::circle(final_output, {left_start.x-(img.rows-left_start.y),img.rows}, 70, cv::Scalar(255,0,0), 1, 8, 0);
+        cv::circle(final_output, {right_start.x+(img.rows-right_start.y),img.rows}, 70, cv::Scalar(255,0,0), 1, 8, 0);
+        imshow("waypoint", final_output);
+
+        for(i=img.rows;i<1.5*img.rows;i++)
+        {
+            lane_cloud=addtocloud(lane_cloud, {left_start.x-(img.rows-left_start.y),i});
+            lane_cloud=addtocloud(lane_cloud, {right_start.x+(img.rows-right_start.y),i});
+        }
+
+        for(j=left_start.x-(img.rows-left_start.y);j<right_start.x+(img.rows-right_start.y);j++)
+        {
+            lane_cloud=addtocloud(lane_cloud, {j,1.5*img.rows});
+        }
+
+        /*for(i=0;i<img.rows;i++)
+            for(j=0;j<img.cols;j++)
+                lane_cloud=addtocloud(lane_cloud, {i,j});*/
+    }
+
+
     return target_pose;
    
 
@@ -684,7 +789,16 @@ void publishTarget(const sensor_msgs::ImageConstPtr msg ) {
     // img= cv_bridge.imgMsgToCv(msge, "mono8");
     // cv::cvtColor(msg.image,img,CV_BGR2GRAY);
     img = cv_ptr->image;
+
+    std::cout<<"before findTarget"<<lane_cloud->points.size()<<std::endl;
     msge = findTarget(img);
+
+    std::cout<<lane_cloud->points[lane_cloud->points.size()-1].x<<" "<<lane_cloud->points[lane_cloud->points.size()-1].y<<std::endl;
+
+    std::cout<<"before publish: "<<lane_cloud->points.size()<<" "<<lane_cloud->height<<" "<<lane_cloud->width<<std::endl;
+    lane_cloud->width = lane_cloud->points.size();
+    cloud_pub.publish(lane_cloud);
+    std::cout<<"after publish"<<lane_cloud->points.size()<<std::endl;
     geometry_msgs::Pose2D temp1,temp2;
     temp1=msge;
     for(int i=0;i<3;i++)
@@ -704,6 +818,9 @@ void publishTarget(const sensor_msgs::ImageConstPtr msg ) {
     msge.x=(900-msge.y)/100;
     msge.y= 5 -temp11;
     new_msg = convert_Pose2D_to_PoseStamped(msge);
+
+  std::cout << "Entered publish target" << std::endl << std::endl << std::endl;
+
     pub_point.publish(new_msg);
     if(debug)
     {
@@ -723,14 +840,16 @@ int main(int argc, char **argv) {
     msge.x=0;
     msge.y=0;
     msge.theta=0;
-    pub_point = node_handle.advertise<geometry_msgs::PoseStamped>("/lane_navigator/intermediate_target", 50);
-    ros::Subscriber lanes_subscriber = node_handle.subscribe("/lane_detector1/lanes", 1, &publishTarget);
+    pub_point = node_handle.advertise<geometry_msgs::PoseStamped>("/lane_navigator/intermediate_target", 10);
+    ros::Subscriber lanes_subscriber = node_handle.subscribe("/lane_detector1/lanes", 10, &publishTarget);
 
-    
+    ros::Subscriber point_cloud_subscriber = node_handle.subscribe("cloud_data", 10, update_pointcloud);
+    cloud_pub = node_handle.advertise<pcl::PointCloud<pcl::PointXYZ> >("/stitched_cloud_data", 10);
 
     while(ros::ok()){
     node_handle.getParam(node_name + "/debug", debug);
     ros::spinOnce();
+    //cloud_pub.publish(lane_cloud);
     }
     return 0;
 }

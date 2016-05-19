@@ -11,9 +11,16 @@
 #include <queue>
 #include <tf/transform_datatypes.h>
 #include <ros/package.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/ros/conversions.h>
 
 struct co_ord_ {int x;int y;};
 typedef struct co_ord_ co_ord;
+
+cv::Point laneStart(cv::Mat& output_lane);
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr addtocloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_msg, cv::Point p);
 
 
 class quadratic_curve
