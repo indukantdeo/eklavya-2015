@@ -72,13 +72,13 @@ void LaneDetector::interpret() {
     }
 
 
-    result=shadowRemoval(result);
+    //result=shadowRemoval(result);
     if (debug_mode > 0) {
       cv::imshow("shadowRemoved",result);
       cv::waitKey(wait_time);
     }
 
-    //result=obstacleRemoval(result);
+    result=obstacleRemoval(result);
 
     result = inversePerspectiveTransform(result);
     

@@ -69,6 +69,17 @@ void update_pointcloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
   std::cout << "Entered update cloud" << std::endl << std::endl << std::endl;
 }
 
+float laneAngle(cv::Mat lane)
+{
+    cv::Point lane_start, lane_end;
+    lane_start=laneStart(lane);
+    cv::flip(lane, lane, 0);
+    lane_end=laneStart(lane);
+    lane_end.y=lane.rows-lane_end.y;
+
+    return std::atan2(lane_start.y - lane_end.y, lane_start.x - lane_end.x);
+}
+
 cv::Point laneStart(cv::Mat& output_lane)
 {
     int error_margin=35;
@@ -98,6 +109,11 @@ cv::Point laneStart(cv::Mat& output_lane)
     lanestart.y=lanestart.y/error_margin;
 
     return lanestart;
+}
+
+int quadratic_curve::point(int y)
+{
+    return a*y*y+b*y+c;
 }
 
 cv::Mat quadratic_curve::draw_curve(cv::Mat img)
@@ -145,7 +161,7 @@ void quadratic_curve::ransac(std::vector<co_ord>& points, cv::Mat &img)
     quadratic_curve lane, temp_lane, line, temp_line;
     lane.matches=-1;
     co_ord p1, p2, p3;
-    int iterations=100;
+    int iterations=200;
     srand(12);
 
     while(iterations-- && points.size()!=0) 
@@ -171,41 +187,40 @@ void quadratic_curve::ransac(std::vector<co_ord>& points, cv::Mat &img)
         }
     }
 
-    //fit with linear model
-    /*std::vector<cv::Vec2f> lines;
-
-    int high=1000, low=1, mid;
-    bool stop=false;
-    while(high>low)
+    iterations=100;
+    int error_margin=25;
+    line.matches=-1;
+    while(iterations-- && points.size()!=0) 
     {
-    	mid=(high+low+1)/2;
-    	cv::HoughLines(img, lines, 1, CV_PI/180, mid, 0, 0 );
+        //randomly select three distinct points
+        do
+        {
+            p1=points[rand()%points.size()];
+            p2=points[rand()%points.size()];
+        }
+        while(p1.y==p2.y);
+        //compute curve corresponding to these 2 points
+        temp_line.a=0;
+        temp_line.b=(p1.x-p2.x)/(p1.y-p2.y);
+        temp_line.c=p1.x-temp_line.b*p1.y;
+        //find number of points lying on this curve
+        temp_line.matches=0;
+        for(size_t i=0;i<points.size();i++)
+            if(abs(points[i].x-temp_line.b*points[i].y-temp_line.c)<error_margin) temp_line.matches++;
 
-    	if(lines.size()==0)	high=mid-1;
-    	else if(lines.size()>0)	low=mid;
+        //if line is better than current best, update current best
+        if(temp_line.matches>=line.matches)
+        {
+            line=temp_line;
+        }
     }
 
-    float rho = lines[0][0], theta = lines[0][1];
-    cv::Point pt1, pt2;
-    double a = cos(theta), b = sin(theta);
-    double x0 = a*rho, y0 = b*rho;
-    pt1.x = cvRound(x0 + 1000*(-b));
-    pt1.y = cvRound(y0 + 1000*(a));
-    pt2.x = cvRound(x0 - 1000*(-b));
-    pt2.y = cvRound(y0 - 1000*(a));
-     
-    line.a=a;
-    if(pt1.x-pt2.x==0) line.b=99999;
-    else line.b=(pt1.y-pt2.y)/(pt1.x-pt2.x);
-    line.c=pt1.y-line.b*pt1.x;
-
-
-    if(mid>0.95*lane.matches)
+    if(line.matches>0.8*lane.matches)
     {
         a=line.a;
         b=line.b;
         c=line.c;
-        matches=mid;
+        matches=line.matches;
     }
     else
     {
@@ -213,12 +228,7 @@ void quadratic_curve::ransac(std::vector<co_ord>& points, cv::Mat &img)
         b=lane.b;
         c=lane.c;
         matches=lane.matches;
-    }*/
-
-    a=lane.a;
-    b=lane.b;
-    c=lane.c;
-    matches=lane.matches;
+    }
 
 }
 
@@ -331,10 +341,10 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
         lane_start.x=lane_start.x/35;
         lane_start.y=lane_start.y/35;
         cv::rectangle(final_output, {lane_start.x-150,lane_start.y-150}, {lane_start.x+150,lane_start.y+150}, 255, 1, 8, 0);
-        if(lane_start.x>img.cols/2) is_single_lane_left=false;
-        else is_single_lane_left=true;
+        //if(lane_start.x>img.cols/2) is_single_lane_left=false;
+        //else is_single_lane_left=true;
 
-        /*if(start_frame==true)
+        if(start_frame==true)
         {
             if(first_lane.x_intercept(img)<img.cols/2) is_single_lane_left=true;
             else is_single_lane_left=false;
@@ -349,7 +359,7 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
             if(abs(pre_left_intercept-first_lane.x_intercept(img))<abs(pre_right_intercept-first_lane.x_intercept(img)))
                 is_single_lane_left=true;
             else false;
-        }*/
+        }
 
         is_previous_single=true;
         if(is_single_lane_left==true) is_previous_left=true;

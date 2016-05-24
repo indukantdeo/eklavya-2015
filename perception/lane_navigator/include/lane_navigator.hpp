@@ -36,4 +36,5 @@ public:
 	void compute_quadratic(co_ord p1, co_ord p2, co_ord p3);
 	bool on_curve(co_ord p);
 	void ransac(std::vector<co_ord>& points, cv::Mat &img);
+	int point(int y);
 };
