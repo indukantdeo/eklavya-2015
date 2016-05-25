@@ -1,6 +1,29 @@
 #include <lane_navigator.hpp>
 //#pragma_once
 
+#include <opencv2/highgui/highgui.hpp>
+#include <ros/package.h>
+#include <math.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/ros/conversions.h>
+
+#define ANGLE_SPREAD 180
+#define BOT_REFERENCE_X 500
+#define BOT_REFERENCE_Y 100   //100 pixels with respect to cartesian coordinates
+#define LARGE_VAL 10000
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr addtocloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_msg, cv::Point p)
+{
+    cloud_msg->points.push_back(pcl::PointXYZ(((p.y-1000)+2*BOT_REFERENCE_Y)*(0.01) + 5.82,(BOT_REFERENCE_X-p.x)*0.01,0));
+    return cloud_msg;
+}
+typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
+PointCloud::Ptr lane_cloud(new PointCloud);
+
+ros::Publisher cloud_pub;
+
+
 const int bot_x = 500, bot_y = 900;
 int step_move = -700;
 const cv::Point origin(0, 480); //Wrt top left corner
@@ -14,12 +37,8 @@ int counter=0;
 int mid_point=500;
 
 int pre_left_intercept, pre_right_intercept;
-int pre_left_centroid, pre_right_centroid;
 bool is_previous_single=false, is_previous_left;
 bool start_frame=true;
-
-geometry_msgs::Pose2D target_pose;
-ros::NodeHandle node_handle;
 
 
 geometry_msgs::Pose2D* temp=new geometry_msgs::Pose2D [3];
@@ -41,6 +60,60 @@ geometry_msgs::PoseStamped convert_Pose2D_to_PoseStamped(geometry_msgs::Pose2D p
     pose_stamp.pose.orientation.w=frame_quat.w();
 
     return pose_stamp;
+}
+
+void update_pointcloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
+{
+  lane_cloud=cloud;
+
+  std::cout << "Entered update cloud" << std::endl << std::endl << std::endl;
+}
+
+float laneAngle(cv::Mat lane)
+{
+    cv::Point lane_start, lane_end;
+    lane_start=laneStart(lane);
+    cv::flip(lane, lane, 0);
+    lane_end=laneStart(lane);
+    lane_end.y=lane.rows-lane_end.y;
+
+    return std::atan2(lane_start.y - lane_end.y, lane_start.x - lane_end.x);
+}
+
+cv::Point laneStart(cv::Mat& output_lane)
+{
+    int error_margin=35;
+
+    int i, j, flag=0;
+    cv::Point lanestart;
+    lanestart.x=0;
+    lanestart.y=0;
+
+    for(i=output_lane.rows-1;i>=0;i--)
+    {
+        if(flag>=error_margin) break;
+
+        for(j=0;j<output_lane.cols;j++)
+        {
+            if(flag>=error_margin) break;
+            if(output_lane.at<uchar>(i,j)==255)
+            {
+                flag++;
+                lanestart.x+=j;
+                lanestart.y+=i;
+            }
+        }
+    }
+
+    lanestart.x=lanestart.x/error_margin;
+    lanestart.y=lanestart.y/error_margin;
+
+    return lanestart;
+}
+
+int quadratic_curve::point(int y)
+{
+    return a*y*y+b*y+c;
 }
 
 cv::Mat quadratic_curve::draw_curve(cv::Mat img)
@@ -88,7 +161,7 @@ void quadratic_curve::ransac(std::vector<co_ord>& points, cv::Mat &img)
     quadratic_curve lane, temp_lane, line, temp_line;
     lane.matches=-1;
     co_ord p1, p2, p3;
-    int iterations=100;
+    int iterations=200;
     srand(12);
 
     while(iterations-- && points.size()!=0) 
@@ -114,50 +187,40 @@ void quadratic_curve::ransac(std::vector<co_ord>& points, cv::Mat &img)
         }
     }
 
-    //fit with linear model
-    /*std::vector<cv::Vec2f> lines;
-
-    int high=1000, low=1, mid;
-    bool stop=false;
-    while(high>low)
+    iterations=100;
+    int error_margin=25;
+    line.matches=-1;
+    while(iterations-- && points.size()!=0) 
     {
-    	mid=(high+low+1)/2;
-    	cv::HoughLines(img, lines, 1, CV_PI/180, mid, 0, 0 );
+        //randomly select three distinct points
+        do
+        {
+            p1=points[rand()%points.size()];
+            p2=points[rand()%points.size()];
+        }
+        while(p1.y==p2.y);
+        //compute curve corresponding to these 2 points
+        temp_line.a=0;
+        temp_line.b=(p1.x-p2.x)/(p1.y-p2.y);
+        temp_line.c=p1.x-temp_line.b*p1.y;
+        //find number of points lying on this curve
+        temp_line.matches=0;
+        for(size_t i=0;i<points.size();i++)
+            if(abs(points[i].x-temp_line.b*points[i].y-temp_line.c)<error_margin) temp_line.matches++;
 
-    	if(lines.size()==0)	high=mid-1;
-    	else if(lines.size()>0)	low=mid;
+        //if line is better than current best, update current best
+        if(temp_line.matches>=line.matches)
+        {
+            line=temp_line;
+        }
     }
 
-    float rho = lines[0][0], theta = lines[0][1];
-    cv::Point pt1, pt2;
-    double a = cos(theta), b = sin(theta);
-    double x0 = a*rho, y0 = b*rho;
-    pt1.x = cvRound(x0 + 1000*(-b));
-    pt1.y = cvRound(y0 + 1000*(a));
-    pt2.x = cvRound(x0 - 1000*(-b));
-    pt2.y = cvRound(y0 - 1000*(a));
-     
-    line.a=a;
-    if(pt1.x-pt2.x==0) line.b=99999;
-    else line.b=(pt1.y-pt2.y)/(pt1.x-pt2.x);
-    line.c=pt1.y-line.b*pt1.x;*/
-
-    /*line.matches=0;
-    for(size_t j=0;j<img.rows;j++)
-        for(size_t k=0;k<img.cols;k++)
-        {
-            if(img.at<uchat>(j,k)>=20 && on_curve({k,j})==true)
-                line.matches++;
-        }
-
-    }*/
-
-    /*if(mid>0.95*lane.matches)
+    if(line.matches>0.8*lane.matches)
     {
         a=line.a;
         b=line.b;
         c=line.c;
-        matches=mid;
+        matches=line.matches;
     }
     else
     {
@@ -165,44 +228,14 @@ void quadratic_curve::ransac(std::vector<co_ord>& points, cv::Mat &img)
         b=lane.b;
         c=lane.c;
         matches=lane.matches;
-    }*/
-    a=lane.a;
-        b=lane.b;
-        c=lane.c;
-        matches=lane.matches;
-
-}
-
-cv::Point find_centroid(cv::Mat img)
-{
-    int counter=0;
-    cv::Point cen;
-    cen.x=0;
-    cen.y=0;
-
-    int i, j;
-    for(i=0;i<img.rows;i++)
-        for(j=0;j<img.cols;j++)
-        {
-            if(img.at<uchar>(i,j)>=20)
-            {
-                cen.x+=j;
-                cen.y+=i;
-                counter++;
-            }
-        }
-
-    cen.x=cen.x/counter;
-    cen.y=cen.y/counter;
-
-    return cen;
-
+    }
 
 }
 
 
 geometry_msgs::Pose2D findTarget(cv::Mat img) {
 
+    geometry_msgs::Pose2D target_pose;
     cv::Point target_point, lane_start;
     float heading;
 
@@ -281,8 +314,8 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
     quadratic_curve second_lane;
     second_lane.ransac(points, first_lane_removed);
 
-    int threshold=1000;
-    if(second_lane.matches<=0.2*white_points) //pixels detected in second lane below certain threshold i.e. only one lane in image
+    int threshold=4000;
+    if(second_lane.matches<=0.1*white_points) //pixels detected in second lane below certain threshold i.e. only one lane in image
     {
         single_lane=true;
         
@@ -311,7 +344,7 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
         //if(lane_start.x>img.cols/2) is_single_lane_left=false;
         //else is_single_lane_left=true;
 
-        /*if(start_frame==true)
+        if(start_frame==true)
         {
             if(first_lane.x_intercept(img)<img.cols/2) is_single_lane_left=true;
             else is_single_lane_left=false;
@@ -326,27 +359,7 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
             if(abs(pre_left_intercept-first_lane.x_intercept(img))<abs(pre_right_intercept-first_lane.x_intercept(img)))
                 is_single_lane_left=true;
             else false;
-        }*/
-
-        if(start_frame==true)
-        {
-            if(first_lane.x_intercept(img)<img.cols/2) is_single_lane_left=true;
-            else is_single_lane_left=false;
         }
-        else if(is_previous_single==true)
-        {
-            if(is_previous_left==true) is_single_lane_left=true;
-            else is_single_lane_left=false;
-        }
-        else
-        {
-            if(abs(pre_left_centroid-find_centroid(output_first_lane).x)<abs(pre_right_centroid-find_centroid(output_first_lane).x))
-                is_single_lane_left=true;
-            else is_single_lane_left=false;
-        }
-
-
-
 
         is_previous_single=true;
         if(is_single_lane_left==true) is_previous_left=true;
@@ -354,12 +367,6 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
 
         cv::Mat output=output_first_lane;
         //imshow("Lanes", output);
-
-        //std::cout<<"single lane: "<<pre_left_centroid<<" "<<pre_right_centroid<<" "<<find_centroid(output_first_lane).x<<std::endl;
-        //if(is_single_lane_left==true) std::cout<<"left"<<std::endl;
-        //else std::cout<<"right"<<std::endl;
-
-        //if(is_single_lane_left==true) cv::waitKey(0);
     }
     else    //two lanes have been detected: draw best fit curve on second_curve and mark the height=point at center_height*img.rows as second_lane center
     {
@@ -390,7 +397,7 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
     		lane_center.y=(first_lane_center.y+second_lane_center.y)/2;
     		cv::circle(final_output, lane_center, 50, cv::Scalar(122,0,0), 1, 8, 0);
 
-            /*if(first_lane.x_intercept(img)>second_lane.x_intercept(img))
+            if(first_lane.x_intercept(img)>second_lane.x_intercept(img))
             {
                 pre_right_intercept=first_lane.x_intercept(img);
                 pre_left_intercept=second_lane.x_intercept(img);
@@ -399,25 +406,8 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
             {
                 pre_left_intercept=first_lane.x_intercept(img);
                 pre_right_intercept=second_lane.x_intercept(img);
-            }*/
-
-            if(find_centroid(output_first_lane).x>find_centroid(output_second_lane).x)
-            {
-                pre_right_centroid=find_centroid(output_first_lane).x;
-                pre_left_centroid=find_centroid(output_second_lane).x;
-
             }
-            else
-            {
-                pre_left_centroid=find_centroid(output_first_lane).x;
-                pre_right_centroid=find_centroid(output_second_lane).x;
-            }
-
-
             is_previous_left=false;
-            is_previous_single=false;
-
-            //std::cout<<"double lane: "<<pre_left_centroid<<" "<<pre_right_centroid<<std::endl;
     }
 
     //std::cout << "beginning part" << std::endl;
@@ -428,19 +418,19 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
 
         std::vector<cv::Vec4i>lines1, lines2;
 
-        int points_thres=200;
+        int points_thres=500;
         cv::Mat hlines1(img.rows,img.cols,CV_8UC3,cv::Scalar(0,0,0));
         cv::Mat hlines2(img.rows,img.cols,CV_8UC3,cv::Scalar(0,0,0));
-        while(lines1.size()==0 && points_thres>=20)
+        while(lines1.size()==0 && points_thres>=50)
         {
             cv::HoughLinesP(output_first_lane, lines1, 1, CV_PI / 180, points_thres, 15, 5);
-            points_thres-=20;
+            points_thres-=50;
         }
-        points_thres=200;
-        while(lines2.size()==0 && points_thres>=20)
+        points_thres=500;
+        while(lines2.size()==0 && points_thres>=50)
         {
             cv::HoughLinesP(output_second_lane, lines2, 1, CV_PI / 180, points_thres, 15, 5);
-            points_thres-=20;
+            points_thres-=50;
         }
         
 
@@ -568,8 +558,6 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
         //cv::circle(final_output, {target_point.x,target_point.y}, 40, cv::Scalar(255,0,0), 1, 8, 0);
         angle = lane_angle;
 
-        std::cout<<"(double lanes)lane_angle="<<lane_angle<<std::endl;
-
 
 
 
@@ -579,7 +567,7 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
 
         std::vector<cv::Vec4i>lines;
         cv::Mat hlines(img.rows,img.cols,CV_8UC3,cv::Scalar(0,0,0));
-        cv::HoughLinesP(output_first_lane, lines, 1, CV_PI / 180, 20, 10, 5);
+        cv::HoughLinesP(output_first_lane, lines, 1, CV_PI / 180, 25, 15, 5);
         double lane_angle=0.0;
             
         for( size_t i = 0; i < lines.size(); i++ )
@@ -680,9 +668,7 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
             lane_angle=1.57;
         }
 
-        std::cout<<"(single lanes)lane_angle="<<lane_angle<<std::endl;
-
-        int shift=200, target_height=300;
+        int shift=200, target_height=130;
 
         if(is_single_lane_left)
         {
@@ -692,11 +678,8 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
             //target_point.x=(lane_start.x+shift)+abs(target_height*cos(lane_angle));
             //target_point.y=(lane_start.y)-abs(target_height*sin(lane_angle));
 
-            target_point.x=(lane_start.x+abs(shift*sin(lane_angle)))-(target_height*cos(lane_angle));
-            target_point.y=(lane_start.y-shift*cos(lane_angle))-abs(target_height*sin(lane_angle));
-
-            cv::line(final_output, lane_start, {(lane_start.x+abs(shift*sin(lane_angle))),(lane_start.y-shift*cos(lane_angle))}, 255, 10, 8, 0);
-            cv::line(final_output, {(lane_start.x+abs(shift*sin(lane_angle))),(lane_start.y-shift*cos(lane_angle))}, target_point, 255, 10, 8, 0);
+            target_point.x=(lane_start.x+abs(shift*sin(lane_angle)))+abs(target_height*cos(lane_angle));
+            target_point.y=(lane_start.y+shift*cos(lane_angle))-abs(target_height*sin(lane_angle));
 
         }
         else
@@ -707,11 +690,8 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
             //target_point.x=(lane_start.x-shift)-abs(target_height*cos(lane_angle));
             //target_point.y=(lane_start.y)-abs(target_height*sin(lane_angle));
 
-            target_point.x=(lane_start.x-abs(shift*sin(lane_angle)))-target_height*cos(lane_angle);
-            target_point.y=(lane_start.y+shift*cos(lane_angle))-abs(target_height*sin(lane_angle));
-
-            cv::line(final_output, lane_start, {(lane_start.x-abs(shift*sin(lane_angle))),(lane_start.y+shift*cos(lane_angle))}, 255, 10, 8, 0);
-            cv::line(final_output, {(lane_start.x-abs(shift*sin(lane_angle))),(lane_start.y+shift*cos(lane_angle))}, target_point, 255, 10, 8, 0);
+            target_point.x=(lane_start.x-abs(shift*sin(lane_angle)))+abs(target_height*cos(lane_angle));
+            target_point.y=(lane_start.y-shift*cos(lane_angle))-abs(target_height*sin(lane_angle));
         }
 
         //std::cout<<"lane intercept: "<<lane_intercept.x<<" "<<lane_intercept.y<<std::endl;
@@ -720,6 +700,7 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
         cv::circle(final_output, lane_start, 30, cv::Scalar(122,0,0), 1, 8, 0);
         cv::circle(final_output, target_point, 50, cv::Scalar(122,0,0), 1, 8, 0);
         //cv::line(final_output, lane_intercept, target_point, 255, 10, 8, 0);
+        cv::line(final_output, lane_start, target_point, 255, 10, 8, 0);
         lane_center.x=target_point.x;
         lane_center.y=target_point.y;
         angle=lane_angle;
@@ -731,7 +712,6 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
    //cv::circle(final_output, {target_point.x,target_point.y}, 50, cv::Scalar(122,0,0), 1, 8, 0);
     imshow("right_lines",right_lines);
     imshow("left_lines",left_lines);
-    imshow("waypoint", final_output);
     imshow("heading", head);
 
 
@@ -748,91 +728,65 @@ geometry_msgs::Pose2D findTarget(cv::Mat img) {
     target_pose.theta = angle-CV_PI/2;
     //target_pose.theta = CV_PI+angle;
 
-    //std::cout<<target_pose.x<<" "<<target_pose.y<<std::endl;
+    std::cout<<target_pose.x<<" "<<target_pose.y<<std::endl;
 
     start_frame=false;
+
+    //
+    //Add additional lanes
+    // 
+    if(single_lane==false)
+    {
+        cv::Point left_start, right_start;
+
+        if(first_lane.x_intercept(img)>second_lane.x_intercept(img))
+        {
+            left_start=laneStart(output_second_lane);
+            right_start=laneStart(output_first_lane);
+        }
+        else
+        {
+            right_start=laneStart(output_second_lane);
+            left_start=laneStart(output_first_lane);
+        }
+
+        for(i=left_start.y;i<img.rows;i++)
+            {
+                lane_cloud=addtocloud(lane_cloud, {left_start.x-(i-left_start.y),i});
+                //std::cout<<lane_cloud->points.size()<<std::endl;
+            }
+
+        for(i=right_start.y;i<img.rows;i++)
+            lane_cloud=addtocloud(lane_cloud, {right_start.x+(i-right_start.y),i});
+
+        cv::circle(final_output, left_start, 30, cv::Scalar(255,0,0), 1, 8, 0);
+        cv::circle(final_output, right_start, 30, cv::Scalar(255,0,0), 1, 8, 0);
+
+        cv::circle(final_output, {left_start.x-(img.rows-left_start.y),img.rows}, 70, cv::Scalar(255,0,0), 1, 8, 0);
+        cv::circle(final_output, {right_start.x+(img.rows-right_start.y),img.rows}, 70, cv::Scalar(255,0,0), 1, 8, 0);
+        imshow("waypoint", final_output);
+
+        for(i=img.rows;i<1.5*img.rows;i++)
+        {
+            lane_cloud=addtocloud(lane_cloud, {left_start.x-(img.rows-left_start.y),i});
+            lane_cloud=addtocloud(lane_cloud, {right_start.x+(img.rows-right_start.y),i});
+        }
+
+        for(j=left_start.x-(img.rows-left_start.y);j<right_start.x+(img.rows-right_start.y);j++)
+        {
+            lane_cloud=addtocloud(lane_cloud, {j,1.5*img.rows});
+        }
+
+        /*for(i=0;i<img.rows;i++)
+            for(j=0;j<img.cols;j++)
+                lane_cloud=addtocloud(lane_cloud, {i,j});*/
+    }
+
 
     return target_pose;
    
 
 }
-
-void update_target(const sensor_msgs::LaserScan msg)
-{
-    cv::Point target;
-    target.x=target_pose.x;
-    target.y=target_pose.y;
-
-    float lane_angle=CV_PI/2-target_pose.theta;
-
-    std::vector<float> V;                   //LIDAR data
-    float min_angle,max_angle,increment;
-
-    V=msg.ranges;
-    min_angle=msg.angle_min;
-    max_angle=msg.angle_max;
-    increment=msg.angle_increment;
-    cv::Mat obs(1000, 1000, CV_8UC1, 0);
-
-    int i,j;
-    
-     /*  Ideally the angle must start from -45 and end up to 225. But it has been seen in the bag files that it works good if started from -70 and go upto 200. This occurs due to improper alignment of lidar with camera. */
-    double start_angle = -70, end_angle=200;
-    double i1, j1;
-
-    double angle=start_angle;
-    /* The loop has been used to mark the obstacles on a fresh image as well as on a image with lanes. */
-    for (i = 0; angle<end_angle; i++)
-    {
-        i1 = 800-V[i] * sin(3.14*angle / 180)*100;
-        j1 = 100*V[i] * cos(3.14*angle / 180)+500;
-        if (i1 > 5 && i1 < 995 && j1>5 && j1 < 995)
-        {
-            obs.at<uchar>(floor(i1), floor(j1)) = 255;
-            obs.at<uchar>(floor(i1), ceil(j1)) = 255;
-            obs.at<uchar>(ceil(i1), floor(j1)) = 255;
-            obs.at<uchar>(ceil(i1), ceil(j1)) = 255;
-        }
-        //cout<<floor(i1)<<" "<<floor(j1)<<endl;
-        angle = angle + 0.3;
-    }
-
-    bool obs_near_target=false;
-    int thres=50;
-    for(i=target.x-thres;i<target.x+thres;i++)
-        for(j=target.y-thres;j<target.y+thres;j++)
-        {
-            if(obs.at<uchar>(j,i)==255)
-            {
-                obs_near_target=true;
-            }
-        }
-
-    if(obs_near_target==false)
-        return;
-
-    float shift=50;
-    while(obs_near_target==true)
-    {
-        target.x=target.x-shift*cos(lane_angle);
-        target.y=target.y-abs(shift*sin(lane_angle));
-
-        obs_near_target=false;
-        for(i=target.x-thres;i<target.x+thres;i++)
-            for(j=target.y-thres;j<target.y+thres;j++)
-                if(obs.at<uchar>(j,i)==255)
-                    obs_near_target=true;
-
-
-    }
-
-    target_pose.x=target.x;
-    target_pose.y=target.y;
-    return;
-
-}
-
-
 
 void publishTarget(const sensor_msgs::ImageConstPtr msg ) {
     if (debug){ROS_INFO("Listened for the %d time\n", count++);
@@ -845,14 +799,16 @@ void publishTarget(const sensor_msgs::ImageConstPtr msg ) {
     // img= cv_bridge.imgMsgToCv(msge, "mono8");
     // cv::cvtColor(msg.image,img,CV_BGR2GRAY);
     img = cv_ptr->image;
+
+    std::cout<<"before findTarget"<<lane_cloud->points.size()<<std::endl;
     msge = findTarget(img);
 
-    int buffer_size=1000000000;
-    ros::Subscriber scan_sub = node_handle.subscribe("/scan", buffer_size, update_target);
-    ros::spinOnce();
+    std::cout<<lane_cloud->points[lane_cloud->points.size()-1].x<<" "<<lane_cloud->points[lane_cloud->points.size()-1].y<<std::endl;
 
-
-
+    std::cout<<"before publish: "<<lane_cloud->points.size()<<" "<<lane_cloud->height<<" "<<lane_cloud->width<<std::endl;
+    lane_cloud->width = lane_cloud->points.size();
+    cloud_pub.publish(lane_cloud);
+    std::cout<<"after publish"<<lane_cloud->points.size()<<std::endl;
     geometry_msgs::Pose2D temp1,temp2;
     temp1=msge;
     for(int i=0;i<3;i++)
@@ -872,6 +828,9 @@ void publishTarget(const sensor_msgs::ImageConstPtr msg ) {
     msge.x=(900-msge.y)/100;
     msge.y= 5 -temp11;
     new_msg = convert_Pose2D_to_PoseStamped(msge);
+
+  std::cout << "Entered publish target" << std::endl << std::endl << std::endl;
+
     pub_point.publish(new_msg);
     if(debug)
     {
@@ -887,17 +846,20 @@ void publishTarget(const sensor_msgs::ImageConstPtr msg ) {
 int main(int argc, char **argv) {
     std::string node_name= "lane_navigator";
     ros::init(argc, argv, node_name);
-    
+    ros::NodeHandle node_handle;
     msge.x=0;
     msge.y=0;
     msge.theta=0;
-    pub_point = node_handle.advertise<geometry_msgs::PoseStamped>("/lane_navigator/intermediate_target", 50);
-    ros::Subscriber lanes_subscriber = node_handle.subscribe("/lane_detector1/lanes", 1, &publishTarget);
+    pub_point = node_handle.advertise<geometry_msgs::PoseStamped>("/lane_navigator/intermediate_target", 10);
+    ros::Subscriber lanes_subscriber = node_handle.subscribe("/lane_detector1/lanes", 10, &publishTarget);
 
+    ros::Subscriber point_cloud_subscriber = node_handle.subscribe("cloud_data", 10, update_pointcloud);
+    cloud_pub = node_handle.advertise<pcl::PointCloud<pcl::PointXYZ> >("/stitched_cloud_data", 10);
 
     while(ros::ok()){
     node_handle.getParam(node_name + "/debug", debug);
     ros::spinOnce();
+    //cloud_pub.publish(lane_cloud);
     }
     return 0;
 }

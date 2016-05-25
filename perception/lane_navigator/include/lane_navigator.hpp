@@ -15,6 +15,10 @@
 #include <pcl/point_types.h>
 #include <pcl/ros/conversions.h>
 
+#include <vector>
+#include <sensor_msgs/LaserScan.h>
+#include <stack>
+
 struct co_ord_ {int x;int y;};
 typedef struct co_ord_ co_ord;
 
